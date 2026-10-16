@@ -6,6 +6,8 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const { WebSocketServer } = require("ws");
+const { createStore, levelInfo } = require("./store");
+const store = createStore();
 
 const PORT = process.env.PORT || 3000;
 const ROOT = __dirname;
@@ -88,8 +90,46 @@ function newCode() {
   do { s = ""; for (let k = 0; k < 4; k++) s += A[crypto.randomInt(A.length)]; } while (rooms.has(s));
   return s;
 }
+function setNick(id, nick) {
+  const p = store.ensure(id);
+  const n = cleanNick(nick, "");
+  if (n && n !== p.nick) { p.nick = n; if (p.games) store.save(p); }
+  return p;
+}
 const cleanNick = (n, fallback) => (String(n || "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, 12) || fallback);
 const multiLimit = (r) => Math.max(6, 15 - (r.chain.length - 1) * 0.35);
+
+/* ---------- 경험치 · 랭킹 ---------- */
+function profileView(p) {
+  const li = levelInfo(p.exp);
+  return { nick: p.nick, exp: p.exp, level: li.level, cur: li.cur, need: li.need, wins: p.wins, games: p.games, best: p.best, rank: store.rankOf(p) };
+}
+function topList() {
+  return store.top(50).map((p, i) => ({ rank: i + 1, id: p.id, nick: p.nick, level: levelInfo(p.exp).level, exp: p.exp, wins: p.wins, games: p.games, best: p.best }));
+}
+// 경험치를 주고, 레벨이 올랐는지 알려 줘요
+function reward(id, gained, { win = false, score = 0 } = {}) {
+  const p = store.ensure(id);
+  const before = levelInfo(p.exp).level;
+  p.exp += Math.max(0, Math.round(gained));
+  p.games += 1;
+  if (win) p.wins += 1;
+  p.best = Math.max(p.best, score);
+  store.save(p);
+  const view = profileView(p);
+  send(byId.get(id), { t: "reward", exp: Math.round(gained), levelUp: view.level > before, profile: view });
+  return view;
+}
+function rewardRoom(r) {
+  const n = r.players.length;
+  for (const p of r.players) {
+    const win = p.id === r.winner;
+    reward(p.id, p.score + 10 + (win ? 40 * (n - 1) : 0), { win, score: p.score });
+    p.lv = levelInfo(store.ensure(p.id).exp).level;
+  }
+}
+const SOLO = { easy: { mult: 0.3, win: 10 }, normal: { mult: 0.5, win: 30 }, hard: { mult: 0.8, win: 60 } };
+const lastSolo = new Map();
 
 function publicState(r) {
   return {
@@ -128,6 +168,7 @@ function eliminate(r, idx, reason) {
   const alive = r.players.filter((q) => !q.out);
   if (alive.length <= 1) {
     r.status = "over"; r.winner = alive[0] ? alive[0].id : null; r.deadline = 0; clearTimeout(r.timer);
+    rewardRoom(r);
     return;
   }
   if (idx === r.turn) {
@@ -181,7 +222,7 @@ wss.on("connection", (ws) => {
       if (old && old !== ws) { conns.get(old) && (conns.get(old).code = null); try { old.close(); } catch {} }
       c.id = id; byId.set(id, ws);
       clearTimeout(graceTimers.get(id)); graceTimers.delete(id);
-      send(ws, { t: "welcome", id });
+      send(ws, { t: "welcome", id, profile: profileView(store.ensure(id)) });
       // 새로고침 후 원래 있던 방으로 복귀
       for (const r of rooms.values()) if (r.players.some((p) => p.id === id)) { c.code = r.code; send(ws, { t: "state", s: publicState(r) }); return; }
       send(ws, { t: "rooms", rooms: roomList() });
@@ -195,7 +236,8 @@ wss.on("connection", (ws) => {
       case "create": {
         if (c.code) leave(ws);
         const code = newCode();
-        const room = { code, status: "lobby", host: c.id, createdAt: Date.now(), players: [{ id: c.id, nick: cleanNick(m.nick, "플레이어1"), score: 0, out: false }],
+        const me = setNick(c.id, m.nick);
+        const room = { code, status: "lobby", host: c.id, createdAt: Date.now(), players: [{ id: c.id, nick: me.nick, lv: levelInfo(me.exp).level, score: 0, out: false }],
           turn: 0, last: "", used: [], usedSet: new Set(), chain: [], limit: 15, deadline: 0, seq: 0, winner: null, note: "", noteId: null, timer: null };
         rooms.set(code, room); c.code = code;
         broadcast(room); broadcastRooms();
@@ -209,11 +251,24 @@ wss.on("connection", (ws) => {
         if (room.status !== "lobby") return send(ws, { t: "error", msg: "이미 게임이 진행 중인 방이에요." });
         if (room.players.length >= MAX_PLAYERS) return send(ws, { t: "error", msg: "방이 꽉 찼어요." });
         if (c.code) leave(ws);
-        room.players.push({ id: c.id, nick: cleanNick(m.nick, "플레이어" + (room.players.length + 1)), score: 0, out: false });
+        const me = setNick(c.id, m.nick);
+        room.players.push({ id: c.id, nick: me.nick, lv: levelInfo(me.exp).level, score: 0, out: false });
         c.code = code; broadcast(room); broadcastRooms();
         break;
       }
       case "leave": leave(ws); break;
+      case "nick": { const me = setNick(c.id, m.nick); send(ws, { t: "profile", profile: profileView(me) }); break; }
+      case "top": send(ws, { t: "top", list: topList(), me: profileView(store.ensure(c.id)) }); break;
+      case "solo": {
+        // 봇 대전 결과: 브라우저가 보내는 값이라 상한을 둬요
+        const d = SOLO[m.diff]; if (!d) return;
+        const now = Date.now(); if (now - (lastSolo.get(c.id) || 0) < 15000) return;
+        lastSolo.set(c.id, now);
+        const words = Math.max(0, Math.min(200, Math.floor(Number(m.words) || 0)));
+        const score = Math.max(0, Math.min(Math.floor(Number(m.score) || 0), words * 110, 5000));
+        reward(c.id, score * d.mult + (m.win ? d.win : 0), { win: !!m.win, score });
+        break;
+      }
       case "start": {
         if (!r || r.status !== "lobby" || r.host !== c.id) return;
         if (r.players.length < 2) return send(ws, { t: "error", msg: "두 명 이상 있어야 시작할 수 있어요." });
@@ -283,4 +338,7 @@ wss.on("connection", (ws) => {
   });
 });
 
-server.listen(PORT, () => console.log(`우리끄투 서버 실행 중: http://localhost:${PORT}`));
+store.init().then(() => {
+  server.listen(PORT, () => console.log(`우리끄투 서버 실행 중: http://localhost:${PORT}`));
+}).catch((e) => { console.error("기록 저장소를 열지 못했어요:", e.message); process.exit(1); });
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { store.flush(); process.exit(0); });
