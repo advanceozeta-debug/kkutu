@@ -75,8 +75,8 @@ h1 span{color:var(--accent)}
 .chip.me{border-color:var(--accent)}.chip.bot{border-color:var(--bot)}.chip.sys{color:var(--muted)}
 
 form{display:flex;gap:8px}
-input[type=text]{flex:1;min-width:0;font:inherit;font-size:18px;padding:12px 14px;border-radius:10px;border:2px solid var(--line);background:var(--paper);color:var(--fg)}
-input[type=text]:focus{outline:none;border-color:var(--accent)}
+input[type=text],input[type=password]{flex:1;min-width:0;font:inherit;font-size:18px;padding:12px 14px;border-radius:10px;border:2px solid var(--line);background:var(--paper);color:var(--fg)}
+input[type=text]:focus,input[type=password]:focus{outline:none;border-color:var(--accent)}
 input[type=text]:disabled{opacity:.55}
 input.small{font-size:16px;padding:10px 12px}
 button{font:inherit;font-weight:600;cursor:pointer;border-radius:10px;border:2px solid var(--fg);background:var(--fg);color:var(--paper);padding:10px 16px}
@@ -134,6 +134,36 @@ button:disabled{opacity:.45;cursor:default}
 .note{font-size:12px;color:var(--muted)}
 footer{font-size:11px;color:var(--muted);text-align:center}
 footer a{color:inherit}
+/* 채팅: 넓은 화면은 오른쪽 고정, 좁은 화면은 아래에서 올라오는 창 */
+.chat{position:fixed;z-index:8;display:flex;flex-direction:column;background:var(--paper);border:1.5px solid var(--line);min-height:0}
+.chat-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line-soft)}
+.chat-head b{font-size:13px;letter-spacing:.04em}
+.chat-close{background:none;border:0;color:var(--muted);padding:4px 6px;font-weight:400}
+.chat-list{flex:1;min-height:0;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:6px;font-size:14px}
+.cm{line-height:1.45;word-break:break-word}
+.cm .cn{font-weight:600;margin-right:6px}
+.cm .cn .lv{font-size:12px}
+.cm.me .cn{color:var(--accent)}
+.cm .ct{font-size:11px;color:var(--muted);margin-left:6px;font-family:var(--mono)}
+.cm.sys{color:var(--muted);font-size:13px}
+.chat-empty{color:var(--muted);font-size:13px}
+.chat form{padding:10px;border-top:1px solid var(--line-soft);gap:6px}
+.chat input[type=text]{font-size:15px;padding:9px 11px}
+.chat button[type=submit]{padding:8px 12px}
+.chat-toggle{position:fixed;z-index:9;right:0;top:45%;writing-mode:vertical-rl;padding:12px 6px;border-radius:8px 0 0 8px;font-size:13px;letter-spacing:.1em;
+  margin-right:env(safe-area-inset-right,0px);border:2px solid var(--fg);border-right:0}
+.chat-toggle .badge{writing-mode:horizontal-tb;display:inline-block;margin-top:6px;min-width:18px;padding:0 4px;border-radius:99px;background:var(--accent);color:var(--paper);font-size:11px;text-align:center}
+@media (min-width:960px){
+  body.has-chat{padding-right:352px}
+  body.has-chat .overlay{padding-right:368px}
+  .chat{top:max(16px,env(safe-area-inset-top,0px));bottom:max(16px,env(safe-area-inset-bottom,0px));right:max(16px,env(safe-area-inset-right,0px));width:320px;border-radius:6px}
+  .chat-toggle,.chat-close{display:none}
+}
+@media (max-width:959.98px){
+  .chat{left:0;right:0;bottom:0;height:62%;border-radius:12px 12px 0 0;border-bottom:0;
+    padding-bottom:env(safe-area-inset-bottom,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+  .chat:not(.open){display:none}
+}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
 </head>
@@ -192,10 +222,42 @@ footer a{color:inherit}
       <div class="me-top"><span class="me-name"><span class="lv" id="meLv">Lv.1</span><span id="meNick"></span></span><span class="me-sub" id="meRank"></span></div>
       <div class="xp"><i id="meXp" style="width:0%"></i></div>
       <div class="me-top"><span class="me-sub" id="meXpText"></span><button type="button" class="linkbtn" id="rankBtn">전체 랭킹 보기</button></div>
+      <div class="me-top"><span class="me-sub" id="acctLabel">손님</span><button type="button" class="linkbtn" id="acctBtn">로그인 / 회원가입</button></div>
     </div>
     <span class="load" id="load">단어 사전 0%</span>
   </div>
 </div>
+
+<!-- 로그인 / 회원가입 -->
+<div class="overlay" id="authOv" hidden>
+  <div class="card">
+    <h2 id="authTitle">로그인</h2>
+    <div class="seg" role="group" aria-label="로그인 또는 회원가입" style="grid-template-columns:1fr 1fr">
+      <button type="button" data-auth="login" aria-pressed="true">로그인</button>
+      <button type="button" data-auth="signup">회원가입</button>
+    </div>
+    <form id="authForm" style="flex-direction:column;gap:10px" autocomplete="on">
+      <input type="text" id="authUser" class="small" maxlength="16" placeholder="아이디 (영어 소문자·숫자 3~16자)" autocapitalize="none" autocomplete="username" spellcheck="false">
+      <input type="password" id="authPw" class="small" maxlength="64" placeholder="비밀번호 (4자 이상)" autocomplete="current-password">
+      <input type="text" id="authNick" class="small" maxlength="12" placeholder="닉네임 (선택)" hidden>
+      <p class="note" id="authHint">가입하면 지금까지 쌓은 경험치가 계정으로 옮겨지고, 다른 기기에서도 이어서 할 수 있어요.</p>
+      <button type="submit" id="authSubmit">로그인</button>
+      <div class="msg" id="authMsg"></div>
+    </form>
+    <button type="button" class="ghost" data-home>뒤로</button>
+  </div>
+</div>
+
+<!-- 채팅 -->
+<aside class="chat" id="chat" hidden aria-label="채팅">
+  <div class="chat-head"><b id="chatCh">로비 채팅</b><button type="button" class="chat-close" id="chatClose">닫기</button></div>
+  <div class="chat-list" id="chatList" aria-live="polite"><div class="chat-empty">아직 대화가 없어요. 먼저 인사해 보세요.</div></div>
+  <form id="chatForm" autocomplete="off">
+    <input type="text" id="chatIn" maxlength="200" placeholder="메시지 입력" lang="ko" enterkeyhint="send">
+    <button type="submit">보내기</button>
+  </form>
+</aside>
+<button type="button" class="chat-toggle" id="chatToggle" hidden>채팅<span class="badge" id="chatBadge" hidden>0</span></button>
 
 <!-- 랭킹 -->
 <div class="overlay" id="rankOv" hidden>
@@ -350,7 +412,7 @@ function runTimer(getDeadline,getLimit,mine,onZero){
   loop();
 }
 function stopTimer(){ cancelAnimationFrame(raf); }
-const overlays=["homeOv","soloOv","lobbyOv","waitOv","endOv","rankOv"];
+const overlays=["homeOv","soloOv","lobbyOv","waitOv","endOv","rankOv","authOv"];
 function show(id){ overlays.forEach(o=>$(o).hidden=o!==id); }
 document.querySelectorAll("[data-home]").forEach(b=>b.onclick=()=>show("homeOv"));
 
@@ -457,6 +519,7 @@ function serverUrl(){
 }
 let WS=null, wsReady=null, ME={id:null}, M=null, roomsList=[];
 function storedId(){ try{return localStorage.getItem("kk-id")||""}catch(e){return ""} }
+function storedToken(){ try{return localStorage.getItem("kk-token")||""}catch(e){return ""} }
 function connect(){
   if(wsReady) return wsReady;
   wsReady=new Promise(res=>{
@@ -464,7 +527,7 @@ function connect(){
     let ws; try{ ws=new WebSocket(url); }catch(e){ return res(false); }
     let done=false; const fin=v=>{ if(!done){ done=true; res(v); } };
     const to=setTimeout(()=>{ try{ws.close()}catch(e){} fin(false); },5000);
-    ws.onopen=()=>{ WS=ws; ws.send(JSON.stringify({t:"hello",id:storedId()})); };
+    ws.onopen=()=>{ WS=ws; ws.send(JSON.stringify({t:"hello",id:storedId(),token:storedToken()})); };
     ws.onmessage=e=>{
       let m; try{m=JSON.parse(e.data)}catch(x){return}
       if(m.t==="welcome"){ clearTimeout(to); ME.id=m.id; setProfile(m.profile); try{localStorage.setItem("kk-id",m.id)}catch(x){} fin(true); }
@@ -473,7 +536,7 @@ function connect(){
     ws.onerror=()=>{};
     ws.onclose=()=>{
       clearTimeout(to); fin(false); WS=null; wsReady=null;
-      if(mode==="multi"){ say("서버 연결이 끊겼어요. 다시 연결하는 중…","err"); setInput(false,false); setTimeout(connect,1500); }
+      if(mode==="multi"&&!reconnecting){ say("서버 연결이 끊겼어요. 다시 연결하는 중…","err"); setInput(false,false); setTimeout(connect,1500); }
     };
   });
   return wsReady;
@@ -493,6 +556,10 @@ function onMsg(m){
   else if(m.t==="profile"){ setProfile(m.profile); }
   else if(m.t==="reward"){ setProfile(m.profile); const e=$("endReward"); e.textContent=`경험치 +${m.exp}`+(m.levelUp?` · 레벨 업! Lv.${m.profile.level}`:""); e.hidden=false; }
   else if(m.t==="top"){ renderTop(m.list,m.me); }
+  else if(m.t==="chatlog"){ chatState.lists[m.ch]=m.list||[]; chatState.ch=m.ch; renderChat(); }
+  else if(m.t==="chat"){ const l=chatState.lists[m.ch]; l.push(m.m); if(l.length>80) l.shift(); if(m.ch===chatState.ch){ appendChat(m.m); if(!chatOpen()&&m.m.id!==ME.id&&!m.m.sys) bumpUnread(); } }
+  else if(m.t==="autherr"){ amsg(m.msg,"err"); $("authSubmit").disabled=false; }
+  else if(m.t==="auth"){ onAuth(m); }
 }
 function nickOf(p){ return (p&&p.nick)||"플레이어"; }
 function lmsg(t,cls){ const m=$("lobbyMsg"); m.textContent=t; m.className="msg"+(cls?" "+cls:""); }
@@ -615,6 +682,9 @@ function setProfile(p){
   $("meRank").textContent=p.rank?`${p.rank}위 · ${p.wins}승 ${p.games}판`:"아직 기록 없음";
   $("meXp").style.width=Math.min(100,p.cur/p.need*100).toFixed(1)+"%";
   $("meXpText").textContent=`경험치 ${p.cur.toLocaleString()} / ${p.need.toLocaleString()}`;
+  $("acctLabel").textContent=p.user?`아이디 ${p.user}`:"손님 (이 기기에만 저장)";
+  $("acctBtn").textContent=p.user?"로그아웃":"로그인 / 회원가입";
+  showChat();
 }
 function renderTop(list,me){
   if(me) setProfile(me);
@@ -629,6 +699,78 @@ function renderTop(list,me){
     li.append(a,b,c); ol.appendChild(li);
   }
 }
+/* ---------- 계정 ---------- */
+let authMode="login";
+function amsg(t,cls){ const m=$("authMsg"); m.textContent=t; m.className="msg"+(cls?" "+cls:""); }
+function setAuthMode(md){
+  authMode=md;
+  document.querySelectorAll("[data-auth]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.auth===md));
+  $("authTitle").textContent=md==="login"?"로그인":"회원가입"; $("authSubmit").textContent=md==="login"?"로그인":"가입하기";
+  $("authNick").hidden=md!=="signup"; $("authHint").hidden=md!=="signup"; amsg("");
+  $("authPw").autocomplete=md==="login"?"current-password":"new-password";
+}
+document.querySelectorAll("[data-auth]").forEach(b=>b.onclick=()=>setAuthMode(b.dataset.auth));
+$("authForm").addEventListener("submit",e=>{
+  e.preventDefault();
+  const user=$("authUser").value.trim().toLowerCase(), pw=$("authPw").value;
+  if(!/^[a-z0-9_]{3,16}$/.test(user)){ amsg("아이디는 영어 소문자, 숫자, _ 로 3~16자예요.","err"); return; }
+  if(pw.length<4){ amsg("비밀번호는 4자 이상이에요.","err"); return; }
+  $("authSubmit").disabled=true; amsg(authMode==="login"?"로그인 중…":"가입 중…");
+  send({t:authMode,user,pw,nick:$("authNick").value.trim()});
+});
+function onAuth(m){
+  try{
+    if(m.id){ localStorage.setItem("kk-id",m.id); localStorage.setItem("kk-token",m.token); }
+    else { localStorage.removeItem("kk-id"); localStorage.removeItem("kk-token"); }
+  }catch(e){}
+  $("authSubmit").disabled=false; $("authPw").value="";
+  // 새 계정으로 다시 접속해요
+  reconnecting=true; if(WS) WS.close();
+  setTimeout(()=>{ reconnecting=false; connect().then(()=>show("homeOv")); },300);
+}
+let reconnecting=false;
+$("acctBtn").onclick=()=>{
+  if(ME.profile&&ME.profile.user){ send({t:"logout",token:storedToken()}); return; }
+  setAuthMode("login"); $("authUser").value=""; $("authPw").value=""; show("authOv");
+};
+
+/* ---------- 채팅 ---------- */
+const chatState={ch:"lobby",lists:{lobby:[],room:[]},unread:0};
+const chatOpen=()=>window.matchMedia("(min-width:960px)").matches||$("chat").classList.contains("open");
+function chatLine(m){
+  const d=document.createElement("div");
+  if(m.sys){ d.className="cm sys"; d.textContent=m.text; return d; }
+  d.className="cm"+(m.id===ME.id?" me":"");
+  const n=document.createElement("span"); n.className="cn";
+  const lv=document.createElement("span"); lv.className="lv"; lv.textContent=`Lv.${m.lv}`;
+  n.append(lv,(m.nick||"플레이어")+(m.guest?" (손님)":""));
+  const t=document.createElement("span"); t.className="ct";
+  const dt=new Date(m.ts); t.textContent=`${String(dt.getHours()).padStart(2,"0")}:${String(dt.getMinutes()).padStart(2,"0")}`;
+  d.append(n,document.createTextNode(m.text),t);
+  return d;
+}
+function renderChat(){
+  $("chatCh").textContent=chatState.ch==="room"&&M?`방 채팅 · ${M.code}`:"로비 채팅";
+  const box=$("chatList"); box.innerHTML="";
+  const list=chatState.lists[chatState.ch];
+  if(!list.length){ box.innerHTML='<div class="chat-empty">아직 대화가 없어요. 먼저 인사해 보세요.</div>'; return; }
+  for(const m of list) box.appendChild(chatLine(m));
+  box.scrollTop=box.scrollHeight;
+}
+function appendChat(m){
+  const box=$("chatList"); const empty=box.querySelector(".chat-empty"); if(empty) empty.remove();
+  const near=box.scrollHeight-box.scrollTop-box.clientHeight<80;
+  box.appendChild(chatLine(m)); if(near||m.id===ME.id) box.scrollTop=box.scrollHeight;
+  $("chatCh").textContent=chatState.ch==="room"&&M?`방 채팅 · ${M.code}`:"로비 채팅";
+}
+function bumpUnread(){ chatState.unread++; const b=$("chatBadge"); b.textContent=chatState.unread>99?"99+":chatState.unread; b.hidden=false; }
+function setChatOpen(on){ $("chat").classList.toggle("open",on); if(on){ chatState.unread=0; $("chatBadge").hidden=true; $("chatList").scrollTop=$("chatList").scrollHeight; } }
+$("chatToggle").onclick=()=>setChatOpen(!$("chat").classList.contains("open"));
+$("chatClose").onclick=()=>setChatOpen(false);
+$("chatForm").addEventListener("submit",e=>{ e.preventDefault(); const v=$("chatIn").value.trim(); if(!v) return; send({t:"chat",text:v}); $("chatIn").value=""; });
+$("chatIn").addEventListener("keydown",e=>{ if(e.key==="Enter"&&e.isComposing){ e.preventDefault(); setTimeout(()=>$("chatForm").requestSubmit(),0);} });
+function showChat(){ $("chat").hidden=false; $("chatToggle").hidden=false; document.body.classList.add("has-chat"); }
+
 $("rankBtn").onclick=()=>{ show("rankOv"); $("nickEdit").value=(ME.profile&&ME.profile.nick)||""; send({t:"top"}); };
 $("nickSave").onclick=()=>{ const n=$("nickEdit").value.trim(); if(n) send({t:"nick",nick:n}); setTimeout(()=>send({t:"top"}),200); };
 connect();

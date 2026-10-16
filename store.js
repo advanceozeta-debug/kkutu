@@ -16,6 +16,7 @@ function levelInfo(exp) {
 
 function createStore() {
   const players = new Map();
+  const byUser = new Map(); // 로그인 아이디 -> 플레이어
   let pool = null, timer = null;
 
   async function init() {
@@ -26,9 +27,10 @@ function createStore() {
       await pool.query("CREATE TABLE IF NOT EXISTS kkutu_players (id TEXT PRIMARY KEY, data JSONB NOT NULL, exp INTEGER NOT NULL DEFAULT 0)");
       const { rows } = await pool.query("SELECT data FROM kkutu_players");
       for (const r of rows) players.set(r.data.id, r.data);
+      for (const p of players.values()) if (p.user) byUser.set(p.user, p);
       console.log(`DB에서 플레이어 ${players.size}명 불러옴`);
     } else {
-      try { for (const p of JSON.parse(fs.readFileSync(FILE, "utf8"))) players.set(p.id, p); } catch { /* 처음 실행 */ }
+      try { for (const p of JSON.parse(fs.readFileSync(FILE, "utf8"))) { players.set(p.id, p); if (p.user) byUser.set(p.user, p); } } catch { /* 처음 실행 */ }
       console.log(`파일(${FILE})에서 플레이어 ${players.size}명 불러옴`);
     }
   }
@@ -37,7 +39,7 @@ function createStore() {
     if (pool) return;
     try {
       fs.mkdirSync(path.dirname(FILE), { recursive: true });
-      fs.writeFileSync(FILE + ".tmp", JSON.stringify([...players.values()]));
+      fs.writeFileSync(FILE + ".tmp", JSON.stringify([...players.values()].filter((p) => p.games > 0 || p.user)));
       fs.renameSync(FILE + ".tmp", FILE);
     } catch (e) { console.error("기록 저장 실패:", e.message); }
   }
@@ -45,6 +47,7 @@ function createStore() {
   function save(p) {
     p.updated = Date.now();
     players.set(p.id, p);
+    if (p.user) byUser.set(p.user, p);
     if (pool) {
       pool.query("INSERT INTO kkutu_players (id, data, exp) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, exp = EXCLUDED.exp", [p.id, p, p.exp])
         .catch((e) => console.error("DB 저장 실패:", e.message));
@@ -73,7 +76,9 @@ function createStore() {
     return r;
   }
 
-  return { init, ensure, save, top, rankOf, flush };
+  const get = (id) => players.get(id);
+  const findUser = (user) => byUser.get(user);
+  return { init, ensure, get, findUser, save, top, rankOf, flush };
 }
 
 module.exports = { createStore, levelInfo };

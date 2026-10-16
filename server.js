@@ -93,7 +93,7 @@ function newCode() {
 function setNick(id, nick) {
   const p = store.ensure(id);
   const n = cleanNick(nick, "");
-  if (n && n !== p.nick) { p.nick = n; if (p.games) store.save(p); }
+  if (n && n !== p.nick) { p.nick = n; if (p.games || p.user) store.save(p); }
   return p;
 }
 const cleanNick = (n, fallback) => (String(n || "").replace(/[\u0000-\u001f<>]/g, "").trim().slice(0, 12) || fallback);
@@ -102,7 +102,7 @@ const multiLimit = (r) => Math.max(6, 15 - (r.chain.length - 1) * 0.35);
 /* ---------- 경험치 · 랭킹 ---------- */
 function profileView(p) {
   const li = levelInfo(p.exp);
-  return { nick: p.nick, exp: p.exp, level: li.level, cur: li.cur, need: li.need, wins: p.wins, games: p.games, best: p.best, rank: store.rankOf(p) };
+  return { user: p.user || null, nick: p.nick, exp: p.exp, level: li.level, cur: li.cur, need: li.need, wins: p.wins, games: p.games, best: p.best, rank: store.rankOf(p) };
 }
 function topList() {
   return store.top(50).map((p, i) => ({ rank: i + 1, id: p.id, nick: p.nick, level: levelInfo(p.exp).level, exp: p.exp, wins: p.wins, games: p.games, best: p.best }));
@@ -128,6 +128,36 @@ function rewardRoom(r) {
     p.lv = levelInfo(store.ensure(p.id).exp).level;
   }
 }
+/* ---------- 회원가입 · 로그인 ---------- */
+const sha = (t) => crypto.createHash("sha256").update(t).digest("hex");
+function hashPw(pw, salt) { return crypto.scryptSync(pw, salt, 32).toString("hex"); }
+function checkPw(p, pw) {
+  if (!p.pwHash || !p.salt) return false;
+  const a = Buffer.from(hashPw(pw, p.salt), "hex"), b = Buffer.from(p.pwHash, "hex");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+function issueToken(p) {
+  const token = crypto.randomBytes(24).toString("base64url");
+  p.tokens = [sha(token), ...(p.tokens || [])].slice(0, 5); // 기기 5대까지 로그인 유지
+  store.save(p);
+  return token;
+}
+const tokenOk = (p, token) => typeof token === "string" && (p.tokens || []).includes(sha(token));
+const USER_RE = /^[a-z0-9_]{3,16}$/;
+
+/* ---------- 채팅 ---------- */
+const lobbyLog = [];
+function chatMsg(id, text) {
+  const p = store.ensure(id);
+  return { id, nick: p.nick, lv: levelInfo(p.exp).level, guest: !p.user, text, ts: Date.now() };
+}
+function pushLog(log, m) { log.push(m); if (log.length > 50) log.shift(); }
+function roomSystem(r, text) {
+  const m = { sys: true, text, ts: Date.now() };
+  pushLog(r.chat, m);
+  for (const p of r.players) send(byId.get(p.id), { t: "chat", ch: "room", m });
+}
+
 const SOLO = { easy: { mult: 0.3, win: 10 }, normal: { mult: 0.5, win: 30 }, hard: { mult: 0.8, win: 60 } };
 const lastSolo = new Map();
 
@@ -199,8 +229,9 @@ function leave(ws) {
   if (!c || !c.code) return;
   const r = rooms.get(c.code);
   c.code = null;
-  if (r) removePlayer(r, c.id);
+  if (r) { removePlayer(r, c.id); if (rooms.has(r.code)) roomSystem(r, `${store.ensure(c.id).nick} 님이 나갔어요.`); }
   send(ws, { t: "left" });
+  send(ws, { t: "chatlog", ch: "lobby", list: lobbyLog });
   send(ws, { t: "rooms", rooms: roomList() });
 }
 
@@ -217,14 +248,18 @@ wss.on("connection", (ws) => {
     const c = conns.get(ws);
 
     if (m.t === "hello") {
-      const id = typeof m.id === "string" && /^p[\w-]{8,20}$/.test(m.id) ? m.id : newId();
+      let id = typeof m.id === "string" && /^p[\w-]{8,20}$/.test(m.id) ? m.id : null;
+      // 가입한 계정은 로그인 토큰이 맞아야 그 계정으로 들어와요
+      if (id) { const acc = store.get(id); if (acc && acc.user && !tokenOk(acc, m.token)) id = null; }
+      if (!id) id = newId();
       const old = byId.get(id);
       if (old && old !== ws) { conns.get(old) && (conns.get(old).code = null); try { old.close(); } catch {} }
       c.id = id; byId.set(id, ws);
       clearTimeout(graceTimers.get(id)); graceTimers.delete(id);
       send(ws, { t: "welcome", id, profile: profileView(store.ensure(id)) });
+      send(ws, { t: "chatlog", ch: "lobby", list: lobbyLog });
       // 새로고침 후 원래 있던 방으로 복귀
-      for (const r of rooms.values()) if (r.players.some((p) => p.id === id)) { c.code = r.code; send(ws, { t: "state", s: publicState(r) }); return; }
+      for (const r of rooms.values()) if (r.players.some((p) => p.id === id)) { c.code = r.code; send(ws, { t: "state", s: publicState(r) }); send(ws, { t: "chatlog", ch: "room", list: r.chat }); return; }
       send(ws, { t: "rooms", rooms: roomList() });
       return;
     }
@@ -238,8 +273,9 @@ wss.on("connection", (ws) => {
         const code = newCode();
         const me = setNick(c.id, m.nick);
         const room = { code, status: "lobby", host: c.id, createdAt: Date.now(), players: [{ id: c.id, nick: me.nick, lv: levelInfo(me.exp).level, score: 0, out: false }],
-          turn: 0, last: "", used: [], usedSet: new Set(), chain: [], limit: 15, deadline: 0, seq: 0, winner: null, note: "", noteId: null, timer: null };
+          turn: 0, last: "", used: [], usedSet: new Set(), chain: [], limit: 15, deadline: 0, seq: 0, winner: null, note: "", noteId: null, timer: null, chat: [] };
         rooms.set(code, room); c.code = code;
+        send(ws, { t: "chatlog", ch: "room", list: [] });
         broadcast(room); broadcastRooms();
         break;
       }
@@ -254,9 +290,50 @@ wss.on("connection", (ws) => {
         const me = setNick(c.id, m.nick);
         room.players.push({ id: c.id, nick: me.nick, lv: levelInfo(me.exp).level, score: 0, out: false });
         c.code = code; broadcast(room); broadcastRooms();
+        send(ws, { t: "chatlog", ch: "room", list: room.chat });
+        roomSystem(room, `${me.nick} 님이 들어왔어요.`);
         break;
       }
       case "leave": leave(ws); break;
+      case "chat": {
+        const text = String(m.text || "").replace(/[\u0000-\u001f\u200b-\u200f\u202a-\u202e]/g, " ").trim().slice(0, 200);
+        const now = Date.now();
+        if (!text || now - (c.lastChat || 0) < 700) return;
+        c.lastChat = now;
+        const msg = chatMsg(c.id, text);
+        if (r) { pushLog(r.chat, msg); for (const p of r.players) send(byId.get(p.id), { t: "chat", ch: "room", m: msg }); }
+        else { pushLog(lobbyLog, msg); for (const [w, cc] of conns) if (cc.id && !cc.code) send(w, { t: "chat", ch: "lobby", m: msg }); }
+        break;
+      }
+      case "signup": {
+        if (c.code) return send(ws, { t: "autherr", msg: "방에서 나온 다음에 가입해 주세요." });
+        const user = String(m.user || "").trim().toLowerCase(), pw = String(m.pw || "");
+        if (!USER_RE.test(user)) return send(ws, { t: "autherr", msg: "아이디는 영어 소문자, 숫자, _ 로 3~16자예요." });
+        if (pw.length < 4 || pw.length > 64) return send(ws, { t: "autherr", msg: "비밀번호는 4자 이상이에요." });
+        if (store.findUser(user)) return send(ws, { t: "autherr", msg: "이미 있는 아이디예요." });
+        let p = store.ensure(c.id);
+        if (p.user) return send(ws, { t: "autherr", msg: "로그아웃한 다음에 새로 가입해 주세요." });
+        // 손님으로 쌓은 기록을 그대로 새 계정으로 옮겨요
+        p.user = user; p.salt = crypto.randomBytes(16).toString("hex"); p.pwHash = hashPw(pw, p.salt);
+        const nick = cleanNick(m.nick, ""); if (nick) p.nick = nick;
+        send(ws, { t: "auth", id: p.id, token: issueToken(p), msg: "가입했어요!" });
+        break;
+      }
+      case "login": {
+        if (c.code) return send(ws, { t: "autherr", msg: "방에서 나온 다음에 로그인해 주세요." });
+        c.tries = (c.tries || 0) + 1;
+        if (c.tries > 8) return send(ws, { t: "autherr", msg: "너무 많이 시도했어요. 새로고침 후 다시 해 주세요." });
+        const p = store.findUser(String(m.user || "").trim().toLowerCase());
+        if (!p || !checkPw(p, String(m.pw || ""))) return send(ws, { t: "autherr", msg: "아이디나 비밀번호가 맞지 않아요." });
+        send(ws, { t: "auth", id: p.id, token: issueToken(p), msg: "로그인했어요!" });
+        break;
+      }
+      case "logout": {
+        const p = store.get(c.id);
+        if (p && p.user && tokenOk(p, m.token)) { p.tokens = p.tokens.filter((t) => t !== sha(m.token)); store.save(p); }
+        send(ws, { t: "auth", id: null, token: null, msg: "로그아웃했어요." });
+        break;
+      }
       case "nick": { const me = setNick(c.id, m.nick); send(ws, { t: "profile", profile: profileView(me) }); break; }
       case "top": send(ws, { t: "top", list: topList(), me: profileView(store.ensure(c.id)) }); break;
       case "solo": {
