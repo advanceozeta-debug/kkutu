@@ -1,0 +1,16 @@
+{
+  "name": "woori-kkutu",
+  "version": "1.0.0",
+  "description": "끄투 사전으로 만든 끝말잇기 웹게임 (봇 대전 + 실시간 멀티플레이)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "GPL-3.0-or-later",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

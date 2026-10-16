@@ -575,7 +575,7 @@ $("quitBtn").onclick=goHome;
   $("chainTitle").textContent="이어진 단어 4개 (예시)";
 })();
 
-(async function load(){
+function load(){
   try{
     // 단어 목록은 이 파일 맨 아래 <script id="words">에 들어 있어요
     const text=$("words").textContent;
@@ -585,7 +585,9 @@ $("quitBtn").onclick=goHome;
   }catch(e){
     $("load").textContent="사전을 불러오지 못했어요. 페이지를 새로고침해 주세요.";
   }
-})();
+}
+// 단어 목록(<script id="words">)은 이 코드보다 아래에 있어서, 페이지를 다 읽은 뒤에 불러와요
+if(document.readyState==="loading") document.addEventListener("DOMContentLoaded",load); else load();
 </script>
 <script type="text/plain" id="words">
 가가
