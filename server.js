@@ -23,9 +23,13 @@ const wordsFile = path.join(ROOT, "words.txt");
 const wordText = fs.existsSync(wordsFile)
   ? fs.readFileSync(wordsFile, "utf8")
   : (fs.readFileSync(path.join(ROOT, "index.html"), "utf8").match(/<script type="text\/plain" id="words">([\s\S]*?)<\/script>/) || ["", ""])[1];
+// "#" 줄 위는 표준어 명사(제시어용), 아래는 방언·옛말 등 사람이 낼 수 있는 추가 단어
+let isStd = true;
 for (const w of wordText.split("\n")) {
   if (!w) continue;
+  if (w === "#") { isStd = false; continue; }
   dict.add(w);
+  if (!isStd) continue;
   let a = byFirst.get(w[0]);
   if (!a) byFirst.set(w[0], (a = []));
   a.push(w);
@@ -366,7 +370,7 @@ wss.on("connection", (ws) => {
         const w = String(m.w || "").replace(/\s+/g, "");
         const need = alts(r.last.at(-1));
         let err = "";
-        if (w.length < 2 || w.length > 20) err = "두 글자 이상 입력하세요.";
+        if (w.length < 2 || w.length > 30) err = "두 글자 이상 입력하세요.";
         else if (!/^[가-힣]+$/.test(w)) err = "완성된 한글만 입력할 수 있어요.";
         else if (!need.includes(w[0])) err = `‘${need.join("’ 또는 ‘")}’(으)로 시작해야 해요.`;
         else if (r.usedSet.has(w)) err = "이미 나온 단어예요.";
