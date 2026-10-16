@@ -11,7 +11,7 @@
 ## 바로 하기
 
 - 봇 대전 (GitHub Pages): https://advanceozeta-debug.github.io/kkutu/
-- 친구 대전: 아래 "서버 띄우기"로 만든 주소
+- 친구 대전 + 랭킹 (Render): https://kkutu-ovae.onrender.com
 
 ## 서버 띄우기 (친구 대전)
 
@@ -35,12 +35,12 @@ GitHub Pages는 파일만 보여 주는 곳이라 `server.js` 가 돌지 않아�
 
 플레이어는 브라우저에 저장된 아이디로 구분해요. 브라우저 기록을 지우면 새 플레이어가 돼요.
 
-서비스 이름을 짧게 지으면 주소도 짧아져요. 예: `kkutu.onrender.com`
+서비스 이름을 짧게 지으면 주소도 짧아져요. 예: `kkutu-ovae.onrender.com`
 
 GitHub Pages 화면에서도 친구 대전을 쓰고 싶으면, `index.html` 위쪽의 이 줄에 서버 주소를 적으세요.
 
 ```html
-<meta name="kkutu-server" content="wss://kkutu.onrender.com">
+<meta name="kkutu-server" content="wss://kkutu-ovae.onrender.com">
 ```
 
 ## 내 컴퓨터에서 실행
